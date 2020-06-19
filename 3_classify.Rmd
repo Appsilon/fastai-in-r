@@ -1,0 +1,101 @@
+---
+title: "Classify with a fast.ai model from R level"
+output: html_notebook
+---
+
+In this notebook we use a model trained in fast.ai (a wrapper on PyTorch, a Machine Learning library  in Python).
+
+# Imports and setup
+
+```{r echo=T, results='hide'}
+# import R libraries
+library(reticulate)
+
+library(tibble)
+library(tidyr)
+library(stringr)
+library(jpeg)
+library(knitr)
+library(dplyr)
+```
+
+Load the Python environment in which we can execute the model
+```{r}
+use_python('/anaconda3/envs/fastai_in_R/bin/python', required=TRUE)
+use_condaenv('fastai_in_R')
+```
+
+I am using a Conda environment setup (on a Mac) with the following lines
+```
+conda create fastai_in_R python=3.7
+conda activate fastai_in_R
+
+conda install pytorch torchvision -c pytorch
+pip install fastai
+pip install opencv-python
+```
+
+Import Python libraries
+```{r}
+fastai <- import('fastai.vision')
+```
+
+# Constants
+
+```{r}
+ModelPath <- file.path(getwd(), 'fire_model_script', 'model')
+ModelFilename <- 'trained_model.pkl'
+DataFunExamples <- file.path(getwd(), 'fire_model_script', 'images_fun_examples')
+```
+
+# Get images list
+```{r}
+TestImgList <- list.files(DataFunExamples, full.names=TRUE)
+print(str_glue('Found {length(TestImgList)} images in folder: {DataFunExamples}.\nOne of them is {TestImgList[[5]]}:'))
+include_graphics(TestImgList[[5]])
+```
+# Load model
+```{r}
+print(str_glue('Loading model: {ModelPath}/{ModelFilename}.\nRunning inference on {length(TestImgList)} images.'))
+learn <- fastai$load_learner(ModelPath, ModelFilename, test=TestImgList)
+print(str_glue('Model loaded.\nModel uses {length(learn$data$classes)} classes: {toString(learn$data$classes)}'))
+```
+# Run inference
+```{r}
+InferenceStart <- Sys.time()
+print(str_glue('Starting inference. time={InferenceStart}'))
+Preds <- learn$get_preds(ds_type=fastai$DatasetType$Test)[[1]]
+InferenceStop <- Sys.time()
+print(str_glue('Inference complete. It took {InferenceStop - InferenceStart}.'))
+```
+
+# Prepare predictions
+```{r}
+Classes <- learn$data$classes
+PredsDataFrame <- data.frame(Preds$numpy(), row.names=TestImgList)
+colnames(PredsDataFrame) <- Classes
+PredsDataFrame
+```
+
+```{r}
+PredsTop <- PredsDataFrame %>% 
+  rownames_to_column() %>%
+  gather(top_prediction, score, -rowname) %>%
+  group_by(rowname) %>% 
+  filter(rank(-score) == 1) 
+PredsTop
+```
+
+# Plot predictions
+```{r}
+par(mfrow = c(2, 3), mar = c(0, 0, 3, 0));
+invisible(sapply(seq_along(PredsTop$rowname), function(i) {
+  plot.new()
+  img <- readJPEG(PredsTop$rowname[i])
+  dims <- dim(img)
+  aspect <- dims[1] / dims[2]
+  plot.window(xlim=c(0, 1), ylim=c(0, 1), asp=aspect)
+  rasterImage(img, 0, 0, 1, 1)
+  title(paste0('prediction: ', PredsTop$top_prediction[i], ', score: ', round(PredsTop$score[i], 2)))
+}))
+```
